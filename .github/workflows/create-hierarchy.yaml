@@ -1,0 +1,86 @@
+name: Create hierarchy files.
+
+on:
+  workflow_dispatch:
+    inputs:
+      department:
+        type: string
+        required: true
+
+      service_project:
+        type: string
+        required: true
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents : write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: landing
+
+      - uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs')
+            const path = require('path');
+            
+            const dptJson = JSON.parse(JSON.stringify(${{ inputs.department }}))
+            const prjJson = JSON.parse(JSON.stringify(${{ inputs.service_project }}))
+            const dptDir = './hierarchy/departments'
+            const prjDir = './hierarchy/projects'
+
+            function searchFiles(targetDir, targetName) {
+              const files = fs.readdirSync(targetDir);
+
+              for (const file of files) {
+                const filePath = path.join(targetDir, file);
+                const stat = fs.statSync(filePath);
+
+                if (stat.isDirectory()) {
+                  const result = searchFiles(filePath);
+                  if (result) {
+                    return true
+                  } 
+                } else {
+                  const fj = JSON.parse(fs.readFileSync(filePath,'utf8'))
+                  if (fj.name === targetName){
+                    return true
+                  }
+                }
+              }
+              return false
+            }
+
+            function outputJsonFile(outputDir,fileName,contents) {
+              const ext = ".json"
+              const file = path.join(outputDir, fileName + ext);
+              fs.writeFileSync(file, JSON.stringify(contents, null, 2));
+            }
+
+            const dptExists = searchFiles(dptDir,dptJson.name)
+            const prjExists = searchFiles(prjDir,prjJson.name)
+
+            if (!dptExists) {
+              outputJsonFile(dptDir,dptJson.name,dptJson)
+            }
+
+            if (!prjExists) {
+              outputJsonFile(prjDir,prjJson.name,prjJson)
+            }
+
+      - name: Git push & pull request
+        run: |
+          project_name=$(echo '${{ inputs.service_project }}' | jq -r .name)
+          echo ${project_name}
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git checkout -b ${project_name}
+          git add .
+          git commit -m ":robot: Create folder at `date --iso-8601=seconds`"
+          git push origin -u ${project_name}
+          gh pr create -B "landing" -t "Create projects ${project_name}" -H ${project_name} -b "Review request for creating a new project."
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
